@@ -5,10 +5,10 @@ import os
 
 log = logging.getLogger(__name__)
 
-APP_VERSION = 6701
+APP_VERSION = 6702
 
 # Needed for get_gym_details request.
-API_VERSION = '0.67.1'
+API_VERSION = '0.67.2'
 
 DEFAULT_CONFIG_FILE = 'mrmime_config.json'
 
