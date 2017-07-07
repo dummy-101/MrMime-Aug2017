@@ -6,7 +6,7 @@ from threading import Lock
 
 from pgoapi import PGoApi
 from pgoapi.exceptions import AuthException, PgoapiError, \
-    BannedAccountException, HashingQuotaExceededException
+    BannedAccountException, HashingQuotaExceededException, HashingOfflineException, HashingTimeoutException
 from pgoapi.protos.pogoprotos.inventory.item.item_id_pb2 import *
 from pgoapi.utilities import get_cell_ids, f2i
 
@@ -33,9 +33,9 @@ class POGOAccount(object):
             self._hash_key_provider = hash_key_provider
         elif hash_key:
             self._hash_key_provider = CyclicResourceProvider(hash_key)
+            self._hash_key = hash_key
         else:
-            # Must be filled later with hash keys
-            self._hash_key_provider = CyclicResourceProvider()
+            self._hash_key_provider = None
 
         # Initialize proxies
         self._proxy_url = None
@@ -43,6 +43,7 @@ class POGOAccount(object):
             self._proxy_provider = proxy_provider
         elif proxy_url:
             self._proxy_provider = CyclicResourceProvider(proxy_url)
+            self._proxy_url = proxy_url
         else:
             self._proxy_provider = None
 
@@ -87,6 +88,30 @@ class POGOAccount(object):
 
         # Timestamp when previous user action is completed
         self._last_action = 0
+
+    @property
+    def hash_key(self):
+        return self._hash_key
+
+    @hash_key.setter
+    def hash_key(self, new_key):
+        if self._hash_key_provider is None:
+            self._hash_key_provider = CyclicResourceProvider(new_key)
+        else:
+            self._hash_key_provider.set_single_resource(new_key)
+        self._hash_key = new_key
+
+    @property
+    def proxy_url(self):
+        return self._proxy_url
+
+    @proxy_url.setter
+    def proxy_url(self, new_proxy_url):
+        if self._proxy_provider is None:
+            self._proxy_provider = CyclicResourceProvider(new_proxy_url)
+        else:
+            self._proxy_provider.set_single_resource(new_proxy_url)
+        self._proxy_url = new_proxy_url
 
     def set_position(self, lat, lng, alt):
         """Sets the location and altitude of the account"""
@@ -253,7 +278,7 @@ class POGOAccount(object):
             encounter_id=encounter_id,
             spawn_point_id=spawn_point_id,
             player_latitude=latitude,
-            player_longitude=longitude), get_inbox=True)
+            player_longitude=longitude), action=2.25)
 
     def req_catch_pokemon(self, encounter_id, spawn_point_id, ball,
                           normalized_reticle_size, spin_modifier):
@@ -264,11 +289,16 @@ class POGOAccount(object):
                 spawn_point_id=spawn_point_id,
                 hit_pokemon=1,
                 spin_modifier=spin_modifier,
-                normalized_hit_position=1.0), get_inbox=True)
+                normalized_hit_position=1.0), action=6)
 
     def req_release_pokemon(self, pokemon_id):
         return self.perform_request(
-            lambda req: req.release_pokemon(pokemon_id=pokemon_id), get_inbox=True)
+            lambda req: req.release_pokemon(pokemon_id=pokemon_id))
+
+    def req_fort_details(self, fort_id, fort_lat, fort_lng):
+        return self.perform_request(lambda req: req.fort_details(fort_id=fort_id,
+                                                                 latitude=fort_lat,
+                                                                 longitude=fort_lng), action=1.2)
 
     def req_fort_search(self, fort_id, fort_lat, fort_lng, player_lat,
                         player_lng):
@@ -277,30 +307,33 @@ class POGOAccount(object):
             fort_latitude=fort_lat,
             fort_longitude=fort_lng,
             player_latitude=player_lat,
-            player_longitude=player_lng), get_inbox=True)
+            player_longitude=player_lng), action=2)
 
-    def req_get_gym_details(self, gym_id, gym_lat, gym_lng, player_lat, player_lng):
+    def seq_spin_pokestop(self, fort_id, fort_lat, fort_lng, player_lat,
+                          player_lng):
+        self.req_fort_details(fort_id, fort_lat, fort_lng)
+#        name = responses['FORT_DETAILS'].name
+        return self.req_fort_search(fort_id, fort_lat, fort_lng, player_lat, player_lng)
+
+    def req_gym_get_info(self, gym_id, gym_lat, gym_lng, player_lat, player_lng):
         return self.perform_request(
-            lambda req: req.get_gym_details(gym_id=gym_id,
-                                            player_latitude=f2i(player_lat),
-                                            player_longitude=f2i(player_lng),
-                                            gym_latitude=gym_lat,
-                                            gym_longitude=gym_lng,
-                                            client_version=API_VERSION), get_inbox=True)
+            lambda req: req.gym_get_info(gym_id=gym_id,
+                                         player_lat_degrees=f2i(player_lat),
+                                         player_lng_degrees=f2i(player_lng),
+                                         gym_lat_degrees=gym_lat,
+                                         gym_lng_degrees=gym_lng))
 
     def req_recycle_inventory_item(self, item_id, amount):
         return self.perform_request(lambda req: req.recycle_inventory_item(
             item_id=item_id,
-            count=amount), get_inbox=True)
+            count=amount), action=2)
 
     def req_level_up_rewards(self, level):
         return self.perform_request(
-            lambda req: req.level_up_rewards(level=level), get_inbox=True)
+            lambda req: req.level_up_rewards(level=level))
 
     def req_verify_challenge(self, captcha_token):
-        req = self._api.create_request()
-        req.verify_challenge(token=captcha_token)
-        responses = self._call_request(req)
+        responses = self.perform_request(lambda req: req.verify_challenge(token=captcha_token), action=4)
         if 'VERIFY_CHALLENGE' in responses:
             response = responses['VERIFY_CHALLENGE']
             if 'success' in response:
@@ -396,9 +429,15 @@ class POGOAccount(object):
                 response = request.call()
                 self._last_request = time.time()
                 success = True
-            except HashingQuotaExceededException:
-                if self.cfg['retry_on_hash_quota_exceeded'] == True:
-                    self.log_warning("Hashing quota exceeded. Retrying in 5s.")
+            except HashingQuotaExceededException as e:
+                if self.cfg['retry_on_hash_quota_exceeded'] or self.cfg['retry_on_hashing_error']:
+                    self.log_warning("{}: Retrying in 5s.".format(repr(e)))
+                    time.sleep(5)
+                else:
+                    raise
+            except (HashingOfflineException, HashingTimeoutException) as e:
+                if self.cfg['retry_on_hashing_error']:
+                    self.log_warning("{}: Retrying in 5s.".format(repr(e)))
                     time.sleep(5)
                 else:
                     raise
@@ -741,31 +780,6 @@ class POGOAccount(object):
             page_offset = response.get('page_offset')
             page_timestamp = response['timestamp_ms']
         self._item_templates_time = template_time
-
-    def __getattr__(self, item):
-        # Backwards compatibility
-        if item == 'hash_key':
-            return self._hash_key
-        elif item == 'proxy_url':
-            return self._proxy_url
-        else:
-            return self[item]
-
-    def __setattr__(self, key, value):
-        if key == 'hash_key':
-            # Workaround to directly set one hash key.
-            self._hash_key_provider.set_single_resource(value)
-            self._hash_key = value
-        elif key == 'proxy_url':
-            # Workaround to directly set one proxy.
-            if self._proxy_provider is None:
-                self._proxy_provider = CyclicResourceProvider(value)
-            else:
-                self._proxy_provider.set_single_resource(value)
-            self._proxy_url = value
-        else:
-            # Default: just set the property the normal way
-            super(POGOAccount, self).__setattr__(key, value)
 
     def log_info(self, msg):
         self.last_msg = msg
