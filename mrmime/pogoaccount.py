@@ -317,6 +317,14 @@ class POGOAccount(object):
 #        name = responses['FORT_DETAILS'].name
         return self.req_fort_search(fort_id, fort_lat, fort_lng, player_lat, player_lng)
 
+    def req_add_fort_modifier(self, modifier_id, fort_id, player_lat, player_lng):
+        response = self.perform_request(lambda req: req.add_fort_modifier(
+            modifier_type=modifier_id,
+            fort_id=fort_id,
+            player_latitude=player_lat,
+            player_longitude=player_lng), action=1.2)
+        return response
+
     def req_gym_get_info(self, gym_id, gym_lat, gym_lng, player_lat, player_lng):
         return self.perform_request(
             lambda req: req.gym_get_info(gym_id=gym_id,
@@ -471,13 +479,20 @@ class POGOAccount(object):
             ITEM_ULTRA_BALL,
             ITEM_MASTER_BALL
         ]
+        lure_ids = [
+            ITEM_TROY_DISK
+        ]
         balls = 0
+        lures = 0
         total_items = 0
         for item_id in self.inventory:
             if item_id in ball_ids:
                 balls += self.inventory[item_id]
+            if item_id in lure_ids:
+                lures += self.inventory[item_id]
             total_items += self.inventory[item_id]
         self.inventory_balls = balls
+        self.inventory_lures = lures
         self.inventory_total = total_items
 
     def _parse_responses(self, responses):

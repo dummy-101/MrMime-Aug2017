@@ -1,5 +1,5 @@
 from pgoapi.protos.pogoprotos.inventory.item.item_id_pb2 import ITEM_UNKNOWN, \
-    ITEM_TROY_DISK, ITEM_X_ATTACK, ITEM_X_DEFENSE, ITEM_X_MIRACLE, \
+    ITEM_X_ATTACK, ITEM_X_DEFENSE, ITEM_X_MIRACLE, \
     ITEM_POKEMON_STORAGE_UPGRADE, ITEM_ITEM_STORAGE_UPGRADE
 
 
@@ -9,7 +9,7 @@ def parse_inventory_delta(inv_response):
     inventory = {}
     no_item_ids = (
         ITEM_UNKNOWN,
-        ITEM_TROY_DISK,
+        #ITEM_TROY_DISK,
         ITEM_X_ATTACK,
         ITEM_X_DEFENSE,
         ITEM_X_MIRACLE,
