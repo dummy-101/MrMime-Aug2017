@@ -5,10 +5,10 @@ import os
 
 log = logging.getLogger(__name__)
 
-APP_VERSION = 6702
+APP_VERSION = 6900
 
 # Needed for get_gym_details request.
-API_VERSION = '0.67.2'
+API_VERSION = '0.69.0'
 
 DEFAULT_CONFIG_FILE = 'mrmime_config.json'
 
@@ -18,7 +18,7 @@ _mr_mime_cfg = {
     'player_locale': {                  # Default player locale
         'country': 'US',
         'language': 'en',
-        'timezone': 'America/Denver'
+        'timezone': 'America/Toronto'
     },
     # --- general
     'parallel_logins': True,            # Parallel logins increases number of requests.
